@@ -2,6 +2,7 @@ import { readdir, lstat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { detecterProjet } from './projets.js';
+import { estProtege } from './protections.js';
 
 export const RACINE = homedir();
 
@@ -46,6 +47,11 @@ function nouveauNoeud(nom, type, st) {
 // Parcourt un dossier ; renvoie son nœud avec la taille cumulée
 async function parcourir(chemin, nom, st, dev, opaque) {
   const noeud = nouveauNoeud(nom, 'dossier', st);
+  // Un dossier protégé reste compté en taille mais son contenu n'est ni listé ni analysé
+  if (estProtege(relatif(chemin))) {
+    noeud.protege = true;
+    opaque = true;
+  }
   if (!opaque) noeud.enfants = [];
   etat.dossiers++;
   etat.courant = chemin;

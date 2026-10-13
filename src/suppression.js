@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { RACINE, resumeNoeud, retirerDuArbre, trouverNoeud } from './scanner.js';
 import { lireNotes, retirerNotes } from './notes.js';
+import { estIntouchable } from './protections.js';
 
 const executer = promisify(execFile);
 
@@ -24,7 +25,7 @@ end run`;
 export function candidats(seuil) {
   const notes = lireNotes();
   const retenus = Object.entries(notes)
-    .filter(([chemin, note]) => note <= seuil && !PROTEGES.has(chemin))
+    .filter(([chemin, note]) => note <= seuil && !PROTEGES.has(chemin) && !estIntouchable(chemin))
     .map(([chemin, note]) => ({ chemin, note, noeud: trouverNoeud(chemin) }))
     .filter((c) => c.noeud && c.noeud.type !== 'lien'); // absents du scan ou liens : ignorés
 
@@ -54,6 +55,7 @@ async function mettreUn(relatif) {
   const segments = typeof relatif === 'string' ? relatif.split('/') : [];
   if (segments.length === 0 || segments.some((s) => s === '' || s === '.' || s === '..')) throw new Error('Chemin invalide');
   if (PROTEGES.has(relatif)) throw new Error('Dossier protégé');
+  if (estIntouchable(relatif)) throw new Error('Dossier protégé (ou contenant un dossier protégé)');
   if (!lireNotes()[relatif]) throw new Error('Élément non noté'); // on ne supprime que ce que tu as noté
 
   const noeud = trouverNoeud(relatif);

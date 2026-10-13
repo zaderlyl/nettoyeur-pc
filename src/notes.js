@@ -1,6 +1,7 @@
 import { readFile, writeFile, rename } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { estIntouchable } from './protections.js';
 
 // notes.json à la racine du projet (ignoré par git) : { "chemin/relatif": 1..5 }
 const FICHIER = join(dirname(fileURLToPath(import.meta.url)), '..', 'notes.json');
@@ -30,6 +31,7 @@ function sauvegarder() {
 export function definirNote(chemin, note) {
   if (typeof chemin !== 'string' || chemin.length === 0 || chemin.length > 4096) throw new Error('Chemin invalide');
   if (!Number.isInteger(note) || note < 0 || note > 5) throw new Error('Note invalide (0 à 5)');
+  if (note > 0 && estIntouchable(chemin)) throw new Error('Dossier protégé : il ne peut pas être noté');
 
   if (note === 0) delete notes[chemin];
   else notes[chemin] = note;

@@ -71,6 +71,7 @@ const formatDate = (ms) => (ms ? new Date(ms).toLocaleDateString('fr-FR', { day:
 const extension = (nom) => (nom.includes('.') && !nom.startsWith('.') ? nom.slice(nom.lastIndexOf('.')).toLowerCase() : '');
 
 function libelleType(l) {
+  if (l.protege) return 'Dossier protégé';
   if (l.projet) return `Projet ${l.projet.technos.join(', ') || 'git'}`;
   if (l.type === 'dossier') return 'Dossier';
   if (l.type === 'lien') return 'Lien';
@@ -176,6 +177,7 @@ function afficherListe() {
 
   for (const l of lignes) {
     const nom = el('div', { className: 'nom' }, `${l.type === 'dossier' ? '📁' : l.type === 'lien' ? '🔗' : '📄'} ${l.nom}`);
+    if (l.protege) nom.append(el('span', { className: 'etiquette protege', textContent: '🔒 protégé' }));
     if (l.projet) nom.append(el('span', { className: 'etiquette', textContent: 'projet' }));
     if (etatUI.vue === 'supprimer') {
       nom.prepend(el('input', {
@@ -191,7 +193,7 @@ function afficherListe() {
     const tr = el('tr', {},
       el('td', {}, nom),
       el('td', { textContent: libelleType(l) }),
-      el('td', {}, etoiles(l.chemin)),
+      el('td', {}, l.protege ? el('span', { className: 'discret', textContent: '🔒' }) : etoiles(l.chemin)),
       el('td', { className: 'num taille' }, el('i', { style: `width:${(l.taille / max) * 100}%` }), el('b', { textContent: formatTaille(l.taille) })),
       el('td', { className: 'num', textContent: formatDate(l.modifie) }),
     );
@@ -263,14 +265,15 @@ function afficherDetails(l) {
   const ligne = (k, v) => { if (v != null && v !== '') dl.append(el('dt', { textContent: k }), el('dd', { textContent: v })); };
 
   ligne('Type', libelleType(l));
-  dl.append(el('dt', { textContent: 'Note' }), el('dd', {}, etoiles(l.chemin)));
+  if (l.protege) ligne('Statut', '🔒 Protégé : jamais touché (contenu non listé, non notable, non supprimable)');
+  else dl.append(el('dt', { textContent: 'Note' }), el('dd', {}, etoiles(l.chemin)));
   ligne('Chemin', `~/${l.chemin}`);
   ligne('Taille', `${formatTaille(l.taille)} (${l.taille.toLocaleString('fr')} octets)`);
   if (!l.vueProjet) ligne('Modifié', formatDate(l.modifie)); // pour un projet, l'activité est dans son bloc
   ligne('Créé', l.cree ? formatDate(l.cree) : null);
   ligne('Dernier accès', l.acces ? formatDate(l.acces) : null);
   if (l.type === 'dossier' && !l.vueProjet) {
-    ligne('Contenu', l.contenu === null ? 'non listé (dépendances / dépôt git)' : `${l.contenu} élément(s)`);
+    ligne('Contenu', l.contenu === null ? (l.protege ? 'non listé (protégé)' : 'non listé (dépendances / dépôt git)') : `${l.contenu} élément(s)`);
   }
 
   if (l.projet) {
