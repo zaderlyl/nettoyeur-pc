@@ -6,13 +6,47 @@
   <title>Nettoyeur PC</title>
   <style>
     body { font-family: system-ui, sans-serif; margin: 0; display: grid; place-items: center; min-height: 100vh; background: #111; color: #eee; }
-    p { color: #888; }
+    main { text-align: center; max-width: 36rem; padding: 1rem; }
+    button { font: inherit; padding: .6rem 1.2rem; border-radius: .5rem; border: 0; background: #4f8cff; color: #fff; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: wait; }
+    p { color: #999; }
+    #courant { font-size: .8rem; word-break: break-all; min-height: 1.2rem; }
   </style>
 </head>
 <body>
   <main>
     <h1>Nettoyeur PC</h1>
-    <p>Le squelette fonctionne. Le scan arrive à l'étape suivante.</p>
+    <button id="scan">Scanner mon dossier personnel</button>
+    <p id="resume">Aucun scan lancé.</p>
+    <p id="courant"></p>
   </main>
+  <script>
+    const bouton = document.getElementById('scan');
+    const resume = document.getElementById('resume');
+    const courant = document.getElementById('courant');
+
+    const formatTaille = (o) => {
+      const u = ['o', 'Ko', 'Mo', 'Go', 'To'];
+      let i = 0;
+      while (o >= 1024 && i < u.length - 1) { o /= 1024; i++; }
+      return `${o.toFixed(i ? 1 : 0)} ${u[i]}`;
+    };
+
+    async function suivre() {
+      const e = await (await fetch('/api/scan')).json();
+      resume.textContent = `${e.fichiers.toLocaleString('fr')} fichiers, ${e.dossiers.toLocaleString('fr')} dossiers, ${formatTaille(e.taille)}` +
+        (e.erreurs ? ` (${e.erreurs} inaccessibles)` : '');
+      courant.textContent = e.courant;
+      if (e.etat === 'en-cours') return setTimeout(suivre, 500);
+      bouton.disabled = false;
+      if (e.etat === 'termine') resume.textContent += ` — terminé en ${((e.fin - e.debut) / 1000).toFixed(1)} s`;
+    }
+
+    bouton.addEventListener('click', async () => {
+      bouton.disabled = true;
+      await fetch('/api/scan', { method: 'POST' });
+      suivre();
+    });
+  </script>
 </body>
 </html>
