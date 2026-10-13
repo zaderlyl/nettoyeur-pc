@@ -31,6 +31,11 @@ tbody tr.selection { background: #1d2a44; }
 .taille i { position: absolute; inset: .3rem 0 .3rem auto; background: #4f8cff33; border-radius: .2rem; z-index: 0; }
 .taille b { position: relative; font-weight: 400; z-index: 1; }
 
+.etoiles { white-space: nowrap; user-select: none; }
+.etoiles button { padding: 0 .1rem; border: 0; background: none; font-size: 1.05rem; line-height: 1; color: #55555f; }
+.etoiles button.on { color: #ffc83d; }
+.etoiles button:hover { color: #ffdd7a; }
+
 #details { position: sticky; top: 1rem; background: var(--carte); border: 1px solid var(--bord); border-radius: .6rem; padding: 1rem; font-size: .9rem; max-height: calc(100vh - 2rem); overflow: auto; }
 #details h2 { font-size: 1rem; margin: 0 0 .2rem; word-break: break-all; }
 #details dl { margin: .8rem 0 0; display: grid; grid-template-columns: auto 1fr; gap: .3rem .8rem; }

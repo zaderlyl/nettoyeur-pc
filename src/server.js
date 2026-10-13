@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { etat, lancerScan, lireProjets, listerDossier } from './scanner.js';
+import { definirNote, lireNotes } from './notes.js';
 
 const PORT = 5173;
 const DOSSIER_PUBLIC = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
@@ -18,9 +19,31 @@ function json(res, donnees, code = 200) {
   res.end(JSON.stringify(donnees));
 }
 
+// Lit le corps JSON d'une requête (limité à 10 Ko)
+async function lireCorps(req) {
+  let texte = '';
+  for await (const morceau of req) {
+    texte += morceau;
+    if (texte.length > 10_000) throw new Error('Corps trop gros');
+  }
+  return JSON.parse(texte);
+}
+
 // Routes de l'API ; renvoie true si la requête a été traitée
 function api(req, res) {
   const url = new URL(req.url, 'http://localhost');
+
+  if (url.pathname === '/api/notes' && req.method === 'GET') {
+    json(res, lireNotes());
+    return true;
+  }
+  if (url.pathname === '/api/notes' && req.method === 'PUT') {
+    lireCorps(req)
+      .then(({ chemin, note }) => definirNote(chemin, note))
+      .then(() => json(res, { ok: true }))
+      .catch((e) => json(res, { erreur: e.message }, 400));
+    return true;
+  }
 
   if (url.pathname === '/api/scan' && req.method === 'POST') {
     lancerScan(); // lancé en arrière-plan

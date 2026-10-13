@@ -5,7 +5,46 @@ const etatUI = {
   chemin: [], // segments du dossier courant
   lignes: [],
   selection: null,
+  notes: {}, // chemin relatif -> 1..5
 };
+const notesChargees = fetch('/api/notes').then((r) => r.json()).then((n) => { etatUI.notes = n; });
+
+// Cinq étoiles cliquables ; recliquer sur la note actuelle la retire
+const widgetsEtoiles = new Set(); // pour synchroniser ligne et panneau de détails
+
+function etoiles(chemin) {
+  const zone = el('span', { className: 'etoiles' });
+  const synchroniser = () => {
+    for (const w of widgetsEtoiles) {
+      if (!w.zone.isConnected) widgetsEtoiles.delete(w);
+      else if (w.chemin === chemin) w.dessiner();
+    }
+  };
+  const dessiner = () => {
+    const note = etatUI.notes[chemin] ?? 0;
+    zone.replaceChildren(...[1, 2, 3, 4, 5].map((n) => el('button', {
+      className: n <= note ? 'on' : '',
+      textContent: '★',
+      title: n === note ? 'Retirer la note' : `${n} / 5`,
+      onclick: async (ev) => {
+        ev.stopPropagation(); // ne sélectionne pas la ligne
+        const nouvelle = n === note ? 0 : n;
+        const precedente = etatUI.notes[chemin];
+        if (nouvelle) etatUI.notes[chemin] = nouvelle; else delete etatUI.notes[chemin];
+        synchroniser();
+        const rep = await fetch('/api/notes', { method: 'PUT', body: JSON.stringify({ chemin, note: nouvelle }) }).catch(() => null);
+        if (!rep?.ok) { // sauvegarde échouée : on revient en arrière
+          if (precedente) etatUI.notes[chemin] = precedente; else delete etatUI.notes[chemin];
+          synchroniser();
+          alert('La note n’a pas pu être enregistrée.');
+        }
+      },
+    })));
+  };
+  dessiner();
+  widgetsEtoiles.add({ chemin, zone, dessiner });
+  return zone;
+}
 
 // Crée un élément en toute sécurité (les noms de fichiers ne passent jamais par innerHTML)
 function el(tag, props = {}, ...enfants) {
@@ -61,6 +100,7 @@ async function charger() {
   etatUI.selection = null;
   afficherDetails(null);
   $('option-imbriques').hidden = etatUI.vue !== 'projets';
+  await notesChargees;
 
   if (etatUI.vue === 'fichiers') {
     const rel = etatUI.chemin.join('/');
@@ -99,6 +139,7 @@ function trier(lignes) {
   const cle = $('tri').value;
   const copie = [...lignes];
   if (cle === 'nom') return copie.sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+  if (cle === 'note') return copie.sort((a, b) => (etatUI.notes[b.chemin] ?? 0) - (etatUI.notes[a.chemin] ?? 0) || b.taille - a.taille);
   if (cle === 'type') return copie.sort((a, b) => libelleType(a).localeCompare(libelleType(b), 'fr') || b.taille - a.taille);
   return copie.sort((a, b) => (b[cle] ?? 0) - (a[cle] ?? 0));
 }
@@ -116,6 +157,7 @@ function afficherListe() {
     const tr = el('tr', {},
       el('td', {}, nom),
       el('td', { textContent: libelleType(l) }),
+      el('td', {}, etoiles(l.chemin)),
       el('td', { className: 'num taille' }, el('i', { style: `width:${(l.taille / max) * 100}%` }), el('b', { textContent: formatTaille(l.taille) })),
       el('td', { className: 'num', textContent: formatDate(l.modifie) }),
     );
@@ -151,6 +193,7 @@ function afficherDetails(l) {
   const ligne = (k, v) => { if (v != null && v !== '') dl.append(el('dt', { textContent: k }), el('dd', { textContent: v })); };
 
   ligne('Type', libelleType(l));
+  dl.append(el('dt', { textContent: 'Note' }), el('dd', {}, etoiles(l.chemin)));
   ligne('Chemin', `~/${l.chemin}`);
   ligne('Taille', `${formatTaille(l.taille)} (${l.taille.toLocaleString('fr')} octets)`);
   if (!l.vueProjet) ligne('Modifié', formatDate(l.modifie)); // pour un projet, l'activité est dans son bloc
