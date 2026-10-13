@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { etat, lancerScan, listerDossier } from './scanner.js';
+import { etat, lancerScan, lireProjets, listerDossier } from './scanner.js';
 
 const PORT = 5173;
 const DOSSIER_PUBLIC = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
@@ -29,6 +29,10 @@ function api(req, res) {
   }
   if (url.pathname === '/api/scan' && req.method === 'GET') {
     json(res, etat);
+    return true;
+  }
+  if (url.pathname === '/api/projets' && req.method === 'GET') {
+    json(res, lireProjets());
     return true;
   }
   if (url.pathname === '/api/dossier' && req.method === 'GET') {

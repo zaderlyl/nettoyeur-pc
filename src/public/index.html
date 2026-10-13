@@ -34,7 +34,7 @@
 
     async function suivre() {
       const e = await (await fetch('/api/scan')).json();
-      resume.textContent = `${e.fichiers.toLocaleString('fr')} fichiers, ${e.dossiers.toLocaleString('fr')} dossiers, ${formatTaille(e.taille)}` +
+      resume.textContent = `${e.fichiers.toLocaleString('fr')} fichiers, ${e.dossiers.toLocaleString('fr')} dossiers, ${e.projets} projets, ${formatTaille(e.taille)}` +
         (e.erreurs ? ` (${e.erreurs} inaccessibles)` : '');
       courant.textContent = e.courant;
       if (e.etat === 'en-cours') return setTimeout(suivre, 500);
