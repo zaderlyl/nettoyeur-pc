@@ -118,6 +118,14 @@ const serveur = createServer(async (req, res) => {
   }
 });
 
+// Port déjà pris (ex. ancienne instance encore lancée) : on s'arrête au lieu de laisser l'ancienne répondre
+serveur.on('error', (erreur) => {
+  console.error(erreur.code === 'EADDRINUSE'
+    ? `Le port ${PORT} est déjà utilisé : une autre instance tourne. Arrête-la puis relance.`
+    : erreur.message);
+  process.exit(1);
+});
+
 // Écoute uniquement en local
 serveur.listen(PORT, '127.0.0.1', () => {
   console.log(`Nettoyeur PC : http://localhost:${PORT}`);
