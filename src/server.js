@@ -4,9 +4,21 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { etat, lancerScan, lireProjets, listerDossier } from './scanner.js';
 import { definirNote, lireNotes } from './notes.js';
+import { candidats, mettreALaCorbeille } from './suppression.js';
 
 const PORT = 5173;
 const DOSSIER_PUBLIC = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
+
+// Seul notre propre site peut appeler l'API (protège contre les autres sites et le DNS rebinding)
+const ORIGINES = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]);
+
+function requeteAutorisee(req) {
+  if (!ORIGINES.has(`http://${req.headers.host}`)) return false;
+  if (req.method === 'GET') return true;
+  // Les requêtes qui modifient quelque chose exigent l'origine du site et un en-tête perso,
+  // qu'un autre site ne peut pas envoyer sans notre accord
+  return ORIGINES.has(req.headers.origin) && req.headers['x-nettoyeur'] === '1';
+}
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -19,55 +31,74 @@ function json(res, donnees, code = 200) {
   res.end(JSON.stringify(donnees));
 }
 
-// Lit le corps JSON d'une requête (limité à 10 Ko)
+// Lit le corps JSON d'une requête (limité à 1 Mo)
 async function lireCorps(req) {
   let texte = '';
   for await (const morceau of req) {
     texte += morceau;
-    if (texte.length > 10_000) throw new Error('Corps trop gros');
+    if (texte.length > 1_000_000) throw new Error('Corps trop gros');
   }
   return JSON.parse(texte);
 }
 
 // Routes de l'API ; renvoie true si la requête a été traitée
-function api(req, res) {
+async function api(req, res) {
   const url = new URL(req.url, 'http://localhost');
+  const route = `${req.method} ${url.pathname}`;
 
-  if (url.pathname === '/api/notes' && req.method === 'GET') {
-    json(res, lireNotes());
+  try {
+    switch (route) {
+      case 'GET /api/notes':
+        json(res, lireNotes());
+        return true;
+      case 'PUT /api/notes': {
+        const { chemin, note } = await lireCorps(req);
+        await definirNote(chemin, note);
+        json(res, { ok: true });
+        return true;
+      }
+      case 'POST /api/scan':
+        lancerScan(); // lancé en arrière-plan
+        json(res, etat, 202);
+        return true;
+      case 'GET /api/scan':
+        json(res, etat);
+        return true;
+      case 'GET /api/projets':
+        json(res, lireProjets());
+        return true;
+      case 'GET /api/dossier': {
+        const liste = listerDossier(url.searchParams.get('chemin') ?? '');
+        json(res, liste ?? { erreur: 'Dossier introuvable ou scan non fait' }, liste ? 200 : 404);
+        return true;
+      }
+      case 'GET /api/a-supprimer': {
+        const seuil = Number(url.searchParams.get('seuil') ?? 2);
+        const elements = candidats(Number.isInteger(seuil) ? seuil : 2);
+        json(res, { elements, total: elements.reduce((somme, e) => somme + e.taille, 0) });
+        return true;
+      }
+      case 'POST /api/corbeille': {
+        const { chemins } = await lireCorps(req);
+        if (!Array.isArray(chemins)) throw new Error('Liste de chemins attendue');
+        json(res, { resultats: await mettreALaCorbeille(chemins) });
+        return true;
+      }
+      default:
+        return false;
+    }
+  } catch (e) {
+    json(res, { erreur: e.message }, 400);
     return true;
   }
-  if (url.pathname === '/api/notes' && req.method === 'PUT') {
-    lireCorps(req)
-      .then(({ chemin, note }) => definirNote(chemin, note))
-      .then(() => json(res, { ok: true }))
-      .catch((e) => json(res, { erreur: e.message }, 400));
-    return true;
-  }
-
-  if (url.pathname === '/api/scan' && req.method === 'POST') {
-    lancerScan(); // lancé en arrière-plan
-    json(res, etat, 202);
-    return true;
-  }
-  if (url.pathname === '/api/scan' && req.method === 'GET') {
-    json(res, etat);
-    return true;
-  }
-  if (url.pathname === '/api/projets' && req.method === 'GET') {
-    json(res, lireProjets());
-    return true;
-  }
-  if (url.pathname === '/api/dossier' && req.method === 'GET') {
-    const liste = listerDossier(url.searchParams.get('chemin') ?? '');
-    json(res, liste ?? { erreur: 'Dossier introuvable ou scan non fait' }, liste ? 200 : 404);
-    return true;
-  }
-  return false;
 }
 
 const serveur = createServer(async (req, res) => {
-  if (api(req, res)) return;
+  if (!requeteAutorisee(req)) {
+    res.writeHead(403).end('Interdit');
+    return;
+  }
+  if (await api(req, res)) return;
 
   const chemin = req.url === '/' ? '/index.html' : req.url.split('?')[0];
   const fichier = normalize(join(DOSSIER_PUBLIC, chemin));

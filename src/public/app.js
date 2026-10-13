@@ -6,7 +6,15 @@ const etatUI = {
   lignes: [],
   selection: null,
   notes: {}, // chemin relatif -> 1..5
+  cochees: new Set(), // vue « à supprimer » : chemins qui partiront à la Corbeille
 };
+// Requêtes qui modifient quelque chose : l'en-tête prouve qu'elles viennent de cette page
+const envoyer = (url, methode, corps) => fetch(url, {
+  method: methode,
+  headers: { 'X-Nettoyeur': '1' },
+  body: corps ? JSON.stringify(corps) : undefined,
+});
+
 const notesChargees = fetch('/api/notes').then((r) => r.json()).then((n) => { etatUI.notes = n; });
 
 // Cinq étoiles cliquables ; recliquer sur la note actuelle la retire
@@ -32,7 +40,7 @@ function etoiles(chemin) {
         const precedente = etatUI.notes[chemin];
         if (nouvelle) etatUI.notes[chemin] = nouvelle; else delete etatUI.notes[chemin];
         synchroniser();
-        const rep = await fetch('/api/notes', { method: 'PUT', body: JSON.stringify({ chemin, note: nouvelle }) }).catch(() => null);
+        const rep = await envoyer('/api/notes', 'PUT', { chemin, note: nouvelle }).catch(() => null);
         if (!rep?.ok) { // sauvegarde échouée : on revient en arrière
           if (precedente) etatUI.notes[chemin] = precedente; else delete etatUI.notes[chemin];
           synchroniser();
@@ -70,11 +78,17 @@ function libelleType(l) {
 }
 
 // ---------- Scan ----------
-async function suivreScan() {
+// Met à jour la ligne de résumé en haut de page
+async function majResume() {
   const e = await (await fetch('/api/scan')).json();
   $('resume').textContent = e.etat === 'inactif' ? 'Aucun scan lancé.'
     : `${e.fichiers.toLocaleString('fr')} fichiers, ${e.dossiers.toLocaleString('fr')} dossiers, ${e.projets} projets, ${formatTaille(e.taille)}` +
       (e.erreurs ? ` (${e.erreurs} inaccessibles)` : '');
+  return e;
+}
+
+async function suivreScan() {
+  const e = await majResume();
   $('courant').textContent = e.courant;
   if (e.etat === 'en-cours') {
     $('scan').disabled = true;
@@ -91,7 +105,7 @@ async function suivreScan() {
 
 $('scan').addEventListener('click', async () => {
   $('scan').disabled = true;
-  await fetch('/api/scan', { method: 'POST' });
+  await envoyer('/api/scan', 'POST');
   suivreScan();
 });
 
@@ -100,9 +114,16 @@ async function charger() {
   etatUI.selection = null;
   afficherDetails(null);
   $('option-imbriques').hidden = etatUI.vue !== 'projets';
+  $('suppression').hidden = etatUI.vue !== 'supprimer';
+  $('option-tri').hidden = etatUI.vue === 'supprimer'; // cette liste est triée par note
+  $('resultat').hidden = true;
   await notesChargees;
 
-  if (etatUI.vue === 'fichiers') {
+  if (etatUI.vue === 'supprimer') {
+    const d = await (await fetch(`/api/a-supprimer?seuil=${$('seuil').value}`)).json();
+    etatUI.lignes = d.elements;
+    etatUI.cochees = new Set(d.elements.map((e) => e.chemin)); // tout est coché, à toi de décocher
+  } else if (etatUI.vue === 'fichiers') {
     const rel = etatUI.chemin.join('/');
     const d = await (await fetch(`/api/dossier?chemin=${encodeURIComponent(rel)}`)).json();
     etatUI.lignes = (d.enfants ?? []).map((e) => ({ ...e, chemin: [...etatUI.chemin, e.nom].join('/') }));
@@ -117,14 +138,15 @@ async function charger() {
   }
   afficherFil();
   afficherListe();
+  afficherBilan();
 }
 
 // ---------- Fil d'Ariane ----------
 function afficherFil() {
   const fil = $('fil');
   fil.replaceChildren();
-  if (etatUI.vue === 'projets') {
-    fil.append(el('span', { textContent: `${etatUI.lignes.length} projets` }));
+  if (etatUI.vue !== 'fichiers') {
+    fil.append(el('span', { textContent: `${etatUI.lignes.length} ${etatUI.vue === 'projets' ? 'projets' : 'éléments'}` }));
     return;
   }
   const aller = (n) => { etatUI.chemin = etatUI.chemin.slice(0, n); charger(); };
@@ -136,6 +158,7 @@ function afficherFil() {
 
 // ---------- Liste triée ----------
 function trier(lignes) {
+  if (etatUI.vue === 'supprimer') return lignes; // déjà triée : les moins bien notés d'abord
   const cle = $('tri').value;
   const copie = [...lignes];
   if (cle === 'nom') return copie.sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
@@ -154,6 +177,17 @@ function afficherListe() {
   for (const l of lignes) {
     const nom = el('div', { className: 'nom' }, `${l.type === 'dossier' ? '📁' : l.type === 'lien' ? '🔗' : '📄'} ${l.nom}`);
     if (l.projet) nom.append(el('span', { className: 'etiquette', textContent: 'projet' }));
+    if (etatUI.vue === 'supprimer') {
+      nom.prepend(el('input', {
+        type: 'checkbox',
+        checked: etatUI.cochees.has(l.chemin),
+        onclick: (ev) => ev.stopPropagation(),
+        onchange: (ev) => {
+          if (ev.target.checked) etatUI.cochees.add(l.chemin); else etatUI.cochees.delete(l.chemin);
+          afficherBilan();
+        },
+      }));
+    }
     const tr = el('tr', {},
       el('td', {}, nom),
       el('td', { textContent: libelleType(l) }),
@@ -171,6 +205,42 @@ function afficherListe() {
     corps.append(tr);
   }
 }
+
+// ---------- Suppression ----------
+const cochees = () => etatUI.lignes.filter((l) => etatUI.cochees.has(l.chemin));
+
+function afficherBilan() {
+  if (etatUI.vue !== 'supprimer') return;
+  const choix = cochees();
+  const total = choix.reduce((somme, l) => somme + l.taille, 0);
+  $('bilan').textContent = etatUI.lignes.length === 0
+    ? 'Aucun élément noté à ce niveau. Note des fichiers ou projets avec les étoiles.'
+    : `${choix.length} / ${etatUI.lignes.length} sélectionnés — ${formatTaille(total)} à récupérer`;
+  $('vider').disabled = choix.length === 0;
+}
+
+$('seuil').addEventListener('change', charger);
+
+$('vider').addEventListener('click', async () => {
+  const choix = cochees();
+  const total = choix.reduce((somme, l) => somme + l.taille, 0);
+  const apercu = choix.slice(0, 8).map((l) => `• ${l.chemin} (${formatTaille(l.taille)})`).join('\n');
+  const suite = choix.length > 8 ? `\n… et ${choix.length - 8} autre(s)` : '';
+  if (!confirm(`Mettre ${choix.length} élément(s) à la Corbeille (${formatTaille(total)}) ?\n\n${apercu}${suite}\n\nTu pourras les remettre depuis la Corbeille.`)) return;
+
+  $('vider').disabled = true;
+  $('bilan').textContent = 'Envoi à la Corbeille en cours…';
+  const rep = await envoyer('/api/corbeille', 'POST', { chemins: choix.map((l) => l.chemin) });
+  const { resultats, erreur } = await rep.json();
+  await charger(); // recharge la liste (charger masque #resultat, on l'affiche après)
+
+  const echecs = (resultats ?? []).filter((r) => !r.ok);
+  const reussis = (resultats ?? []).length - echecs.length;
+  $('resultat').textContent = erreur ? `Échec : ${erreur}`
+    : `${reussis} élément(s) mis à la Corbeille.` + echecs.map((r) => `\n✗ ${r.chemin} : ${r.erreur}`).join('');
+  $('resultat').hidden = false;
+  majResume(); // met à jour le résumé global (taille, projets)
+});
 
 // Ouvre un dossier navigable (les dossiers « opaques » comme node_modules ne le sont pas)
 function ouvrir(l) {

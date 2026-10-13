@@ -17,6 +17,15 @@ let ecriture = Promise.resolve(); // sérialise les écritures
 
 export const lireNotes = () => notes;
 
+function sauvegarder() {
+  // Écriture atomique : fichier temporaire puis renommage
+  ecriture = ecriture.catch(() => {}).then(async () => { // un échec précédent ne bloque pas la suite
+    await writeFile(`${FICHIER}.tmp`, JSON.stringify(notes, null, 2));
+    await rename(`${FICHIER}.tmp`, FICHIER);
+  });
+  return ecriture;
+}
+
 // note = 1..5, ou 0 pour retirer la note
 export function definirNote(chemin, note) {
   if (typeof chemin !== 'string' || chemin.length === 0 || chemin.length > 4096) throw new Error('Chemin invalide');
@@ -24,11 +33,13 @@ export function definirNote(chemin, note) {
 
   if (note === 0) delete notes[chemin];
   else notes[chemin] = note;
+  return sauvegarder();
+}
 
-  // Écriture atomique : fichier temporaire puis renommage
-  ecriture = ecriture.catch(() => {}).then(async () => { // un échec précédent ne bloque pas la suite
-    await writeFile(`${FICHIER}.tmp`, JSON.stringify(notes, null, 2));
-    await rename(`${FICHIER}.tmp`, FICHIER);
-  });
-  return ecriture;
+// Retire la note d'un chemin et de tout ce qu'il contenait (après suppression)
+export function retirerNotes(chemin) {
+  for (const cle of Object.keys(notes)) {
+    if (cle === chemin || cle.startsWith(`${chemin}/`)) delete notes[cle];
+  }
+  return sauvegarder();
 }

@@ -1,5 +1,6 @@
 :root { color-scheme: dark; --fond: #111; --carte: #1b1b1f; --bord: #2c2c33; --texte: #eee; --discret: #8b8b96; --accent: #4f8cff; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { font-family: system-ui, sans-serif; margin: 0; background: var(--fond); color: var(--texte); }
 header { display: flex; align-items: center; gap: 1rem; padding: .8rem 1rem; border-bottom: 1px solid var(--bord); flex-wrap: wrap; }
 h1 { font-size: 1.1rem; margin: 0; }
@@ -31,6 +32,12 @@ tbody tr.selection { background: #1d2a44; }
 .taille i { position: absolute; inset: .3rem 0 .3rem auto; background: #4f8cff33; border-radius: .2rem; z-index: 0; }
 .taille b { position: relative; font-weight: 400; z-index: 1; }
 
+.encadre { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; padding: .6rem .8rem; margin-bottom: .6rem; background: var(--carte); border: 1px solid var(--bord); border-radius: .5rem; }
+#bilan { flex: 1; font-size: .9rem; }
+.danger { background: #c0392b; border-color: #c0392b; color: #fff; }
+.danger:disabled { opacity: .4; cursor: not-allowed; }
+#resultat { font-size: .85rem; white-space: pre-line; margin: 0 0 .6rem; padding: .5rem .8rem; border-radius: .4rem; background: var(--carte); border: 1px solid var(--bord); }
+td input[type=checkbox] { margin-right: .3rem; }
 .etoiles { white-space: nowrap; user-select: none; }
 .etoiles button { padding: 0 .1rem; border: 0; background: none; font-size: 1.05rem; line-height: 1; color: #55555f; }
 .etoiles button.on { color: #ffc83d; }

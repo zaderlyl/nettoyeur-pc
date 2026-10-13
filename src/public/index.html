@@ -19,10 +19,23 @@
       <nav id="onglets">
         <button data-vue="fichiers" class="actif">Fichiers</button>
         <button data-vue="projets">Projets</button>
+        <button data-vue="supprimer">À supprimer</button>
       </nav>
+      <div id="suppression" class="encadre" hidden>
+        <label>Noté
+          <select id="seuil">
+            <option value="1">1 étoile</option>
+            <option value="2" selected>2 étoiles ou moins</option>
+            <option value="3">3 étoiles ou moins</option>
+          </select>
+        </label>
+        <span id="bilan"></span>
+        <button id="vider" class="danger">Mettre à la Corbeille</button>
+      </div>
+      <p id="resultat" hidden></p>
       <div id="barre">
         <div id="fil"></div>
-        <label>Trier par
+        <label id="option-tri">Trier par
           <select id="tri">
             <option value="taille">Taille</option>
             <option value="modifie">Date de modification</option>

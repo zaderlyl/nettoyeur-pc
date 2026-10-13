@@ -132,20 +132,47 @@ export async function lancerScan() {
   etat.courant = '';
 }
 
+// Nœud sans ses enfants, avec leur nombre (null = contenu non listé)
+export function resumeNoeud({ enfants, ...resume }) {
+  return { ...resume, contenu: enfants ? enfants.length : null };
+}
+
+// Renvoie [racine, …, nœud] pour un chemin relatif, ou null s'il n'est pas dans le scan
+function chaine(relatif) {
+  if (!arbre) return null;
+  const noeuds = [arbre];
+  for (const segment of relatif.split('/').filter(Boolean)) {
+    const suivant = noeuds.at(-1).enfants?.find((e) => e.nom === segment);
+    if (!suivant) return null;
+    noeuds.push(suivant);
+  }
+  return noeuds;
+}
+
+export function trouverNoeud(relatif) {
+  return chaine(relatif)?.at(-1) ?? null;
+}
+
 // Renvoie les enfants du dossier désigné par un chemin relatif ('' = racine)
 export function listerDossier(relatif) {
-  if (!arbre) return null;
-  let noeud = arbre;
-  for (const segment of relatif.split('/').filter(Boolean)) {
-    noeud = noeud.enfants?.find((e) => e.nom === segment && e.type === 'dossier');
-    if (!noeud) return null;
-  }
+  const noeud = trouverNoeud(relatif);
+  if (!noeud || noeud.type !== 'dossier') return null;
   return {
     nom: noeud.nom,
     taille: noeud.taille,
-    enfants: (noeud.enfants ?? []).map(({ enfants, ...resume }) => ({
-      ...resume,
-      contenu: enfants ? enfants.length : null,
-    })),
+    enfants: (noeud.enfants ?? []).map(resumeNoeud),
   };
+}
+
+// Retire un élément du scan en mémoire (après envoi à la Corbeille)
+export function retirerDuArbre(relatif) {
+  const noeuds = chaine(relatif);
+  if (!noeuds || noeuds.length < 2) return;
+  const noeud = noeuds.at(-1);
+  const parent = noeuds.at(-2);
+  for (const ancetre of noeuds.slice(0, -1)) ancetre.taille -= noeud.taille;
+  parent.enfants = parent.enfants.filter((e) => e !== noeud);
+  etat.taille -= noeud.taille;
+  projets = projets.filter((p) => p.chemin !== relatif && !p.chemin.startsWith(`${relatif}/`));
+  etat.projets = projets.length;
 }
