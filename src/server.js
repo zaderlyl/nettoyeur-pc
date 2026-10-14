@@ -6,7 +6,7 @@ import { etat, lancerScan, lireProjets, lireUnites, listerDossier } from './scan
 import { definirNote, lireNotes } from './notes.js';
 import { candidats, mettreALaCorbeille } from './suppression.js';
 
-const PORT = 5173;
+const PORT = Number(process.env.PORT) || 5173; // PORT=5174 npm run dev pour une 2e instance de test
 const DOSSIER_PUBLIC = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
 
 // Seul notre propre site peut appeler l'API (protège contre les autres sites et le DNS rebinding)
@@ -68,20 +68,35 @@ async function api(req, res) {
         json(res, lireProjets());
         return true;
       case 'GET /api/unites': {
-        // ?genre=projet|dossier|fichier, ?tri=taille|modifie|nom, ?limite=N (défaut 500)
-        const genre = url.searchParams.get('genre');
-        const tri = url.searchParams.get('tri') ?? 'taille';
-        const limite = Math.min(Math.max(Number(url.searchParams.get('limite') ?? 500) || 500, 1), 5000);
+        // ?genre=projet|dossier|fichier  ?statut=notees|non-notees  ?dans=dossier/parent
+        // ?tri=taille|modifie|note|nom  ?limite=N (défaut 500, max 5000)  ?debut=N
+        const q = url.searchParams;
+        const genre = q.get('genre');
+        const statut = q.get('statut');
+        const dans = (q.get('dans') ?? '').trim().replace(/^~?\/+|\/+$/g, '').toLowerCase();
+        const tri = q.get('tri') ?? 'taille';
+        const limite = Math.min(Math.max(Number(q.get('limite') ?? 500) || 500, 1), 5000);
+        const debut = Math.max(Number(q.get('debut') ?? 0) || 0, 0);
+        const notes = lireNotes();
         const toutes = lireUnites();
-        const retenues = genre ? toutes.filter((u) => u.unite === genre) : toutes;
-        const ordre = tri === 'nom' ? (a, b) => a.chemin.localeCompare(b.chemin, 'fr') : (a, b) => (b[tri] ?? 0) - (a[tri] ?? 0);
+
+        const retenues = toutes.filter((u) => (!genre || u.unite === genre)
+          && (statut !== 'notees' || notes[u.chemin])
+          && (statut !== 'non-notees' || !notes[u.chemin])
+          && (!dans || u.chemin.toLowerCase() === dans || u.chemin.toLowerCase().startsWith(`${dans}/`)));
+
+        const ordres = {
+          nom: (a, b) => a.chemin.localeCompare(b.chemin, 'fr'),
+          note: (a, b) => (notes[b.chemin] ?? 0) - (notes[a.chemin] ?? 0) || b.taille - a.taille,
+          modifie: (a, b) => (b.modifie ?? 0) - (a.modifie ?? 0),
+        };
         const parGenre = { projet: 0, dossier: 0, fichier: 0 };
         for (const u of toutes) parGenre[u.unite]++;
         json(res, {
           total: retenues.length,
           taille: retenues.reduce((somme, u) => somme + u.taille, 0),
           parGenre,
-          elements: [...retenues].sort(ordre).slice(0, limite),
+          elements: [...retenues].sort(ordres[tri] ?? ((a, b) => b.taille - a.taille)).slice(debut, debut + limite),
         });
         return true;
       }

@@ -37,10 +37,16 @@ export function lireUnites() {
   return unites;
 }
 
+let genreParChemin = new Map();
+
 function recalculerUnites() {
   unites = calculerUnites(arbre);
+  genreParChemin = new Map(unites.map((u) => [u.chemin, u.unite]));
   etat.unites = unites.length;
 }
+
+// 'projet' | 'dossier' | 'fichier' si ce chemin est une unité, sinon null
+export const uniteDe = (relatif) => genreParChemin.get(relatif) ?? null;
 
 export function lireProjets() {
   return projets;
@@ -180,7 +186,10 @@ export function listerDossier(relatif) {
   return {
     nom: noeud.nom,
     taille: noeud.taille,
-    enfants: (noeud.enfants ?? []).map(resumeNoeud),
+    enfants: (noeud.enfants ?? []).map((e) => ({
+      ...resumeNoeud(e),
+      unite: uniteDe(relatif ? `${relatif}/${e.nom}` : e.nom), // null = simple conteneur, non notable
+    })),
   };
 }
 

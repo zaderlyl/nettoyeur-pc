@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { RACINE, resumeNoeud, retirerDuArbre, trouverNoeud } from './scanner.js';
+import { RACINE, lireUnites, retirerDuArbre, trouverNoeud, uniteDe } from './scanner.js';
 import { lireNotes, retirerNotes } from './notes.js';
 import { DOSSIERS_SYSTEME, estIntouchable } from './protections.js';
 
@@ -14,27 +14,13 @@ const SCRIPT = `on run argv
   tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)
 end run`;
 
-// Éléments notés ≤ seuil, les moins bien notés d'abord.
-// Un élément déjà contenu dans un autre candidat n'est pas listé (il partira avec lui).
+// Unités notées ≤ seuil, les moins bien notées d'abord.
+// Les unités ne sont jamais imbriquées, et les dossiers protégés ou système n'en sont jamais.
 export function candidats(seuil) {
   const notes = lireNotes();
-  const retenus = Object.entries(notes)
-    .filter(([chemin, note]) => note <= seuil && !DOSSIERS_SYSTEME.has(chemin) && !estIntouchable(chemin))
-    .map(([chemin, note]) => ({ chemin, note, noeud: trouverNoeud(chemin) }))
-    .filter((c) => c.noeud && c.noeud.type !== 'lien'); // absents du scan ou liens : ignorés
-
-  const chemins = new Set(retenus.map((c) => c.chemin));
-  const contenu = (chemin) => {
-    for (let c = chemin; c.includes('/');) {
-      c = c.slice(0, c.lastIndexOf('/'));
-      if (chemins.has(c)) return true;
-    }
-    return false;
-  };
-
-  return retenus
-    .filter((c) => !contenu(c.chemin))
-    .map(({ chemin, note, noeud }) => ({ ...resumeNoeud(noeud), chemin, note }))
+  return lireUnites()
+    .filter((u) => notes[u.chemin] > 0 && notes[u.chemin] <= seuil)
+    .map((u) => ({ ...u, note: notes[u.chemin] }))
     .sort((a, b) => a.note - b.note || b.taille - a.taille);
 }
 
@@ -51,6 +37,7 @@ async function mettreUn(relatif) {
   if (DOSSIERS_SYSTEME.has(relatif)) throw new Error('Dossier protégé');
   if (estIntouchable(relatif)) throw new Error('Dossier protégé (ou contenant un dossier protégé)');
   if (!lireNotes()[relatif]) throw new Error('Élément non noté'); // on ne supprime que ce que tu as noté
+  if (!uniteDe(relatif)) throw new Error('Pas une unité du scan : seules les unités entières peuvent être supprimées');
 
   const noeud = trouverNoeud(relatif);
   if (!noeud) throw new Error('Élément absent du scan');

@@ -17,10 +17,28 @@
   <div id="app" hidden>
     <main>
       <nav id="onglets">
-        <button data-vue="fichiers" class="actif">Fichiers</button>
-        <button data-vue="projets">Projets</button>
+        <button data-vue="unites" class="actif">Unités</button>
+        <button data-vue="fichiers">Fichiers</button>
         <button data-vue="supprimer">À supprimer</button>
       </nav>
+      <div id="filtres" class="encadre">
+        <label>Genre
+          <select id="genre">
+            <option value="">Tout</option>
+            <option value="projet">Projets</option>
+            <option value="dossier">Dossiers</option>
+            <option value="fichier">Fichiers</option>
+          </select>
+        </label>
+        <label>Notes
+          <select id="statut">
+            <option value="">Toutes</option>
+            <option value="non-notees">Non notées</option>
+            <option value="notees">Notées</option>
+          </select>
+        </label>
+        <label>Dans <input id="dans" type="search" placeholder="Downloads, Documents/PERSO…" autocomplete="off"></label>
+      </div>
       <div id="suppression" class="encadre" hidden>
         <label>Noté
           <select id="seuil">
@@ -44,13 +62,13 @@
             <option value="nom">Nom</option>
           </select>
         </label>
-        <label id="option-imbriques" hidden><input type="checkbox" id="imbriques"> Sous-projets</label>
       </div>
       <table>
         <thead><tr><th>Nom</th><th>Type</th><th>Note</th><th class="num">Taille</th><th class="num">Modifié</th></tr></thead>
         <tbody id="liste"></tbody>
       </table>
-      <p id="vide" hidden>Dossier vide.</p>
+      <p id="vide" hidden>Rien à afficher.</p>
+      <p id="pied"><button id="suite" hidden>Afficher la suite</button></p>
     </main>
     <aside id="details"><p class="discret">Clique sur une ligne pour voir ses informations.</p></aside>
   </div>

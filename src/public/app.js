@@ -1,9 +1,11 @@
 const $ = (id) => document.getElementById(id);
 
 const etatUI = {
-  vue: 'fichiers', // fichiers | projets
-  chemin: [], // segments du dossier courant
+  vue: 'unites', // unites | fichiers | supprimer
+  chemin: [], // segments du dossier courant (vue fichiers)
   lignes: [],
+  total: 0, // vue unités : nombre d'unités correspondant aux filtres
+  taille: 0,
   selection: null,
   notes: {}, // chemin relatif -> 1..5
   cochees: new Set(), // vue « à supprimer » : chemins qui partiront à la Corbeille
@@ -83,7 +85,7 @@ function libelleType(l) {
 async function majResume() {
   const e = await (await fetch('/api/scan')).json();
   $('resume').textContent = e.etat === 'inactif' ? 'Aucun scan lancé.'
-    : `${e.fichiers.toLocaleString('fr')} fichiers, ${e.dossiers.toLocaleString('fr')} dossiers, ${e.projets} projets, ${formatTaille(e.taille)}` +
+    : `${e.fichiers.toLocaleString('fr')} fichiers, ${e.dossiers.toLocaleString('fr')} dossiers, ${e.unites.toLocaleString('fr')} unités, ${formatTaille(e.taille)}` +
       (e.erreurs ? ` (${e.erreurs} inaccessibles)` : '');
   return e;
 }
@@ -111,43 +113,59 @@ $('scan').addEventListener('click', async () => {
 });
 
 // ---------- Chargement des lignes ----------
-async function charger() {
-  etatUI.selection = null;
-  afficherDetails(null);
-  $('option-imbriques').hidden = etatUI.vue !== 'projets';
+// Vue unités : le serveur filtre, trie et pagine (plusieurs milliers d'unités)
+async function chargerUnites(ajout) {
+  const p = new URLSearchParams({
+    genre: $('genre').value, statut: $('statut').value, tri: $('tri').value,
+    dans: $('dans').value, limite: 500, debut: ajout ? etatUI.lignes.length : 0,
+  });
+  const d = await (await fetch(`/api/unites?${p}`)).json();
+  etatUI.lignes = ajout ? [...etatUI.lignes, ...d.elements] : d.elements;
+  etatUI.total = d.total;
+  etatUI.taille = d.taille;
+}
+
+async function charger(ajout = false) {
+  if (!ajout) {
+    etatUI.selection = null;
+    afficherDetails(null);
+  }
+  $('filtres').hidden = etatUI.vue !== 'unites';
   $('suppression').hidden = etatUI.vue !== 'supprimer';
   $('option-tri').hidden = etatUI.vue === 'supprimer'; // cette liste est triée par note
+  $('tri').querySelector('[value=type]').hidden = etatUI.vue === 'unites'; // tri par type : vue fichiers seulement
+  if ($('tri').value === 'type' && etatUI.vue === 'unites') $('tri').value = 'taille';
   $('resultat').hidden = true;
   await notesChargees;
 
-  if (etatUI.vue === 'supprimer') {
+  if (etatUI.vue === 'unites') {
+    await chargerUnites(ajout);
+  } else if (etatUI.vue === 'supprimer') {
     const d = await (await fetch(`/api/a-supprimer?seuil=${$('seuil').value}`)).json();
     etatUI.lignes = d.elements;
     etatUI.cochees = new Set(d.elements.map((e) => e.chemin)); // tout est coché, à toi de décocher
-  } else if (etatUI.vue === 'fichiers') {
+  } else {
     const rel = etatUI.chemin.join('/');
     const d = await (await fetch(`/api/dossier?chemin=${encodeURIComponent(rel)}`)).json();
     etatUI.lignes = (d.enfants ?? []).map((e) => ({ ...e, chemin: [...etatUI.chemin, e.nom].join('/') }));
-  } else {
-    const projets = await (await fetch('/api/projets')).json();
-    etatUI.lignes = projets
-      .filter((p) => $('imbriques').checked || !p.parent)
-      .map((p) => ({
-        nom: p.nom || p.chemin.split('/').pop(), chemin: p.chemin, type: 'dossier', taille: p.taille,
-        modifie: p.activite, contenu: 1, projet: p, vueProjet: true,
-      }));
   }
   afficherFil();
   afficherListe();
   afficherBilan();
+  $('suite').hidden = !(etatUI.vue === 'unites' && etatUI.lignes.length < etatUI.total);
 }
 
 // ---------- Fil d'Ariane ----------
 function afficherFil() {
   const fil = $('fil');
   fil.replaceChildren();
-  if (etatUI.vue !== 'fichiers') {
-    fil.append(el('span', { textContent: `${etatUI.lignes.length} ${etatUI.vue === 'projets' ? 'projets' : 'éléments'}` }));
+  if (etatUI.vue === 'unites') {
+    fil.append(el('span', { textContent: `${etatUI.total.toLocaleString('fr')} unités — ${formatTaille(etatUI.taille)}` +
+      (etatUI.lignes.length < etatUI.total ? ` (${etatUI.lignes.length.toLocaleString('fr')} affichées)` : '') }));
+    return;
+  }
+  if (etatUI.vue === 'supprimer') {
+    fil.append(el('span', { textContent: `${etatUI.lignes.length} éléments` }));
     return;
   }
   const aller = (n) => { etatUI.chemin = etatUI.chemin.slice(0, n); charger(); };
@@ -159,7 +177,7 @@ function afficherFil() {
 
 // ---------- Liste triée ----------
 function trier(lignes) {
-  if (etatUI.vue === 'supprimer') return lignes; // déjà triée : les moins bien notés d'abord
+  if (etatUI.vue !== 'fichiers') return lignes; // déjà triées par le serveur
   const cle = $('tri').value;
   const copie = [...lignes];
   if (cle === 'nom') return copie.sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
@@ -177,6 +195,7 @@ function afficherListe() {
 
   for (const l of lignes) {
     const nom = el('div', { className: 'nom' }, `${l.type === 'dossier' ? '📁' : l.type === 'lien' ? '🔗' : '📄'} ${l.nom}`);
+    if (etatUI.vue !== 'fichiers') nom.append(el('span', { className: 'chemin', textContent: `~/${l.dossier ?? ''}` }));
     if (l.protege) nom.append(el('span', { className: 'etiquette protege', textContent: '🔒 protégé' }));
     if (l.projet) nom.append(el('span', { className: 'etiquette', textContent: 'projet' }));
     if (etatUI.vue === 'supprimer') {
@@ -193,7 +212,7 @@ function afficherListe() {
     const tr = el('tr', {},
       el('td', {}, nom),
       el('td', { textContent: libelleType(l) }),
-      el('td', {}, l.protege ? el('span', { className: 'discret', textContent: '🔒' }) : etoiles(l.chemin)),
+      el('td', {}, l.protege ? el('span', { className: 'discret', textContent: '🔒' }) : l.unite ? etoiles(l.chemin) : el('span', { className: 'discret', textContent: '—', title: 'Simple conteneur : on note ses unités' })),
       el('td', { className: 'num taille' }, el('i', { style: `width:${(l.taille / max) * 100}%` }), el('b', { textContent: formatTaille(l.taille) })),
       el('td', { className: 'num', textContent: formatDate(l.modifie) }),
     );
@@ -216,12 +235,12 @@ function afficherBilan() {
   const choix = cochees();
   const total = choix.reduce((somme, l) => somme + l.taille, 0);
   $('bilan').textContent = etatUI.lignes.length === 0
-    ? 'Aucun élément noté à ce niveau. Note des fichiers ou projets avec les étoiles.'
+    ? 'Aucune unité notée à ce niveau. Note des unités avec les étoiles (onglet Unités).'
     : `${choix.length} / ${etatUI.lignes.length} sélectionnés — ${formatTaille(total)} à récupérer`;
   $('vider').disabled = choix.length === 0;
 }
 
-$('seuil').addEventListener('change', charger);
+$('seuil').addEventListener('change', () => charger());
 
 $('vider').addEventListener('click', async () => {
   const choix = cochees();
@@ -244,12 +263,14 @@ $('vider').addEventListener('click', async () => {
   majResume(); // met à jour le résumé global (taille, projets)
 });
 
-// Ouvre un dossier navigable (les dossiers « opaques » comme node_modules ne le sont pas)
+// Ouvre un dossier dans la vue Fichiers (pour un fichier : son dossier). Les dossiers « opaques »
+// comme node_modules ne sont pas navigables.
 function ouvrir(l) {
-  if (l.type !== 'dossier' || l.contenu === null) return;
+  const cible = l.type === 'dossier' ? l.chemin : (l.dossier ?? l.chemin.split('/').slice(0, -1).join('/'));
+  if (l.type === 'dossier' && l.contenu === null) return;
   etatUI.vue = 'fichiers';
   document.querySelectorAll('#onglets button').forEach((b) => b.classList.toggle('actif', b.dataset.vue === 'fichiers'));
-  etatUI.chemin = l.chemin.split('/').filter(Boolean);
+  etatUI.chemin = cible.split('/').filter(Boolean);
   charger();
 }
 
@@ -266,13 +287,15 @@ function afficherDetails(l) {
 
   ligne('Type', libelleType(l));
   if (l.protege) ligne('Statut', '🔒 Protégé : jamais touché (contenu non listé, non notable, non supprimable)');
-  else dl.append(el('dt', { textContent: 'Note' }), el('dd', {}, etoiles(l.chemin)));
+  else if (l.unite) dl.append(el('dt', { textContent: 'Note' }), el('dd', {}, etoiles(l.chemin)));
+  else ligne('Note', 'Simple conteneur : on note ses unités, pas lui');
+  if (l.unite) ligne('Unité', { projet: 'projet entier', dossier: 'dossier entier', fichier: 'fichier seul' }[l.unite]);
   ligne('Chemin', `~/${l.chemin}`);
   ligne('Taille', `${formatTaille(l.taille)} (${l.taille.toLocaleString('fr')} octets)`);
-  if (!l.vueProjet) ligne('Modifié', formatDate(l.modifie)); // pour un projet, l'activité est dans son bloc
+  ligne('Modifié', formatDate(l.modifie));
   ligne('Créé', l.cree ? formatDate(l.cree) : null);
   ligne('Dernier accès', l.acces ? formatDate(l.acces) : null);
-  if (l.type === 'dossier' && !l.vueProjet) {
+  if (l.type === 'dossier') {
     ligne('Contenu', l.contenu === null ? (l.protege ? 'non listé (protégé)' : 'non listé (dépendances / dépôt git)') : `${l.contenu} élément(s)`);
   }
 
@@ -290,14 +313,18 @@ function afficherDetails(l) {
   }
 
   panneau.append(el('h2', { textContent: l.nom }), dl);
-  if (l.type === 'dossier' && l.contenu !== null) {
-    panneau.append(el('p', {}, el('button', { className: 'primaire', textContent: 'Ouvrir le dossier', onclick: () => ouvrir(l) })));
+  if ((l.type === 'dossier' && l.contenu !== null) || l.type === 'fichier') {
+    panneau.append(el('p', {}, el('button', { className: 'primaire', textContent: l.type === 'fichier' ? 'Voir son dossier' : 'Ouvrir le dossier', onclick: () => ouvrir(l) })));
   }
 }
 
 // ---------- Événements ----------
-$('tri').addEventListener('change', afficherListe);
-$('imbriques').addEventListener('change', charger);
+$('tri').addEventListener('change', () => (etatUI.vue === 'fichiers' ? afficherListe() : charger()));
+$('genre').addEventListener('change', () => charger());
+$('statut').addEventListener('change', () => charger());
+$('suite').addEventListener('click', () => charger(true));
+let delai;
+$('dans').addEventListener('input', () => { clearTimeout(delai); delai = setTimeout(() => charger(), 300); });
 document.querySelectorAll('#onglets button').forEach((b) => b.addEventListener('click', () => {
   document.querySelectorAll('#onglets button').forEach((x) => x.classList.toggle('actif', x === b));
   etatUI.vue = b.dataset.vue;
