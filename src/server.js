@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { etat, lancerScan, lireProjets, lireUnites, listerDossier } from './scanner.js';
 import { definirNote, lireNotes } from './notes.js';
 import { candidats, mettreALaCorbeille } from './suppression.js';
+import { definirMemo, lireMemos } from './memos.js';
+import { resumer } from './resume.js';
 
 const PORT = Number(process.env.PORT) || 5173; // PORT=5174 npm run dev pour une 2e instance de test
 const DOSSIER_PUBLIC = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
@@ -57,6 +59,18 @@ async function api(req, res) {
         json(res, { ok: true });
         return true;
       }
+      case 'GET /api/memos':
+        json(res, lireMemos());
+        return true;
+      case 'PUT /api/memos': {
+        const { chemin, memo } = await lireCorps(req);
+        await definirMemo(chemin, memo);
+        json(res, { ok: true });
+        return true;
+      }
+      case 'GET /api/resume':
+        json(res, await resumer(url.searchParams.get('chemin') ?? ''));
+        return true;
       case 'POST /api/scan':
         lancerScan(); // lancé en arrière-plan
         json(res, etat, 202);

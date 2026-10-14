@@ -8,6 +8,8 @@ const etatUI = {
   taille: 0,
   selection: null,
   notes: {}, // chemin relatif -> 1..5
+  memos: {}, // chemin relatif -> texte libre (à quoi ça sert)
+  jetonDetails: 0, // évite qu'un résumé tardif écrase le panneau d'une autre sélection
   cochees: new Set(), // vue « à supprimer » : chemins qui partiront à la Corbeille
 };
 // Requêtes qui modifient quelque chose : l'en-tête prouve qu'elles viennent de cette page
@@ -17,7 +19,12 @@ const envoyer = (url, methode, corps) => fetch(url, {
   body: corps ? JSON.stringify(corps) : undefined,
 });
 
-const notesChargees = fetch('/api/notes').then((r) => r.json()).then((n) => { etatUI.notes = n; });
+const notesChargees = Promise.all([
+  fetch('/api/notes').then((r) => r.json()).then((n) => { etatUI.notes = n; }),
+  fetch('/api/memos').then((r) => r.json()).then((m) => { etatUI.memos = m; }),
+]);
+const resumes = new Map(); // chemin -> résumé déjà calculé
+const apercus = new Map(); // chemin -> élément « aperçu » de sa ligne, pour le mettre à jour sans tout redessiner
 
 // Cinq étoiles cliquables ; recliquer sur la note actuelle la retire
 const widgetsEtoiles = new Set(); // pour synchroniser ligne et panneau de détails
@@ -186,7 +193,17 @@ function trier(lignes) {
   return copie.sort((a, b) => (b[cle] ?? 0) - (a[cle] ?? 0));
 }
 
+// Ligne sous le nom : ton mémo s'il existe, sinon la description du projet
+function majApercu(l) {
+  const apercu = apercus.get(l.chemin);
+  if (!apercu) return;
+  const memo = etatUI.memos[l.chemin];
+  apercu.textContent = memo ? `✎ ${memo}` : (l.projet?.description ?? '');
+  apercu.classList.toggle('memo', Boolean(memo));
+}
+
 function afficherListe() {
+  apercus.clear();
   const lignes = trier(etatUI.lignes);
   const max = Math.max(1, ...lignes.map((l) => l.taille));
   const corps = $('liste');
@@ -196,6 +213,12 @@ function afficherListe() {
   for (const l of lignes) {
     const nom = el('div', { className: 'nom' }, `${l.type === 'dossier' ? '📁' : l.type === 'lien' ? '🔗' : '📄'} ${l.nom}`);
     if (etatUI.vue !== 'fichiers') nom.append(el('span', { className: 'chemin', textContent: `~/${l.dossier ?? ''}` }));
+    if (l.unite) {
+      const apercu = el('span', { className: 'apercu' });
+      apercus.set(l.chemin, apercu);
+      majApercu(l);
+      nom.append(apercu);
+    }
     if (l.protege) nom.append(el('span', { className: 'etiquette protege', textContent: '🔒 protégé' }));
     if (l.projet) nom.append(el('span', { className: 'etiquette', textContent: 'projet' }));
     if (etatUI.vue === 'supprimer') {
@@ -216,6 +239,7 @@ function afficherListe() {
       el('td', { className: 'num taille' }, el('i', { style: `width:${(l.taille / max) * 100}%` }), el('b', { textContent: formatTaille(l.taille) })),
       el('td', { className: 'num', textContent: formatDate(l.modifie) }),
     );
+    if (l === etatUI.selection) tr.classList.add('selection');
     tr.addEventListener('click', () => {
       corps.querySelector('.selection')?.classList.remove('selection');
       tr.classList.add('selection');
@@ -274,6 +298,52 @@ function ouvrir(l) {
   charger();
 }
 
+// ---------- Résumé automatique et mémo ----------
+// Résumé calculé localement par le serveur (README, types de fichiers, dates, métadonnées macOS), puis ton mémo
+function blocResume(l) {
+  const bloc = el('div', { className: 'resume' });
+  const phrase = el('p', { className: 'phrase', textContent: 'Résumé en cours…' });
+  const complements = el('dl', { className: 'complements' });
+  bloc.append(phrase, complements);
+
+  const afficher = (r) => {
+    phrase.textContent = r.phrase;
+    complements.replaceChildren(...r.lignes.flatMap(([k, v]) => [el('dt', { textContent: k }), el('dd', { textContent: v })]));
+  };
+  const jeton = ++etatUI.jetonDetails;
+  if (resumes.has(l.chemin)) afficher(resumes.get(l.chemin));
+  else {
+    fetch(`/api/resume?chemin=${encodeURIComponent(l.chemin)}`).then((r) => r.json()).then((r) => {
+      if (r.erreur) throw new Error(r.erreur);
+      resumes.set(l.chemin, r);
+      if (jeton === etatUI.jetonDetails) afficher(r);
+    }).catch((e) => { if (jeton === etatUI.jetonDetails) phrase.textContent = `Résumé indisponible : ${e.message}`; });
+  }
+
+  // Mémo : enregistré tout seul après une courte pause dans la frappe
+  const zone = el('textarea', { className: 'memo-zone', rows: 3, maxLength: 2000, placeholder: 'Mon mémo : à quoi ça sert ?', value: etatUI.memos[l.chemin] ?? '' });
+  const statut = el('span', { className: 'discret' });
+  let delai;
+  const enregistrer = async () => {
+    const texte = zone.value.trim();
+    const precedent = etatUI.memos[l.chemin] ?? '';
+    if (texte === precedent) return;
+    statut.textContent = 'Enregistrement…';
+    const rep = await envoyer('/api/memos', 'PUT', { chemin: l.chemin, memo: texte }).catch(() => null);
+    if (rep?.ok) {
+      if (texte) etatUI.memos[l.chemin] = texte; else delete etatUI.memos[l.chemin];
+      majApercu(l);
+      statut.textContent = 'Enregistré ✓';
+    } else {
+      statut.textContent = 'Échec de l’enregistrement';
+    }
+  };
+  zone.addEventListener('input', () => { statut.textContent = ''; clearTimeout(delai); delai = setTimeout(enregistrer, 800); });
+  zone.addEventListener('blur', () => { clearTimeout(delai); enregistrer(); });
+  bloc.append(zone, statut);
+  return bloc;
+}
+
 // ---------- Panneau de détails ----------
 function afficherDetails(l) {
   const panneau = $('details');
@@ -312,7 +382,9 @@ function afficherDetails(l) {
     ligne('Récupérable', p.regenerable ? `${formatTaille(p.regenerable)} (dépendances, builds)` : null);
   }
 
-  panneau.append(el('h2', { textContent: l.nom }), dl);
+  panneau.append(el('h2', { textContent: l.nom }));
+  if (l.unite && !l.protege) panneau.append(blocResume(l));
+  panneau.append(dl);
   if ((l.type === 'dossier' && l.contenu !== null) || l.type === 'fichier') {
     panneau.append(el('p', {}, el('button', { className: 'primaire', textContent: l.type === 'fichier' ? 'Voir son dossier' : 'Ouvrir le dossier', onclick: () => ouvrir(l) })));
   }

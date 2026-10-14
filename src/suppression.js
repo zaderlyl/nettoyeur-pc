@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { RACINE, lireUnites, retirerDuArbre, trouverNoeud, uniteDe } from './scanner.js';
 import { lireNotes, retirerNotes } from './notes.js';
+import { retirerMemos } from './memos.js';
 import { DOSSIERS_SYSTEME, estIntouchable } from './protections.js';
 
 const executer = promisify(execFile);
@@ -49,6 +50,7 @@ async function mettreUn(relatif) {
   await executer('osascript', ['-e', SCRIPT, complet], { timeout: 300_000 });
   retirerDuArbre(relatif);
   await retirerNotes(relatif);
+  await retirerMemos(relatif);
 }
 
 // Traite les éléments un par un ; renvoie le résultat de chacun
