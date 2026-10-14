@@ -21,6 +21,12 @@ try {
   throw new Error(`protege.json absent ou invalide, l'app ne démarre pas sans lui : ${erreur.message}`);
 }
 
+// Dossiers système du dossier personnel : jamais supprimés ni traités comme une unité
+export const DOSSIERS_SYSTEME = new Set([
+  'Desktop', 'Documents', 'Downloads', 'Library', 'Movies', 'Music', 'Pictures',
+  'Public', 'Applications', '.Trash', '.ssh', '.gnupg',
+]);
+
 // Le chemin est un dossier protégé ou se trouve dedans
 export function estProtege(relatif) {
   const n = normaliser(relatif);

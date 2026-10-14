@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { detecterProjet } from './projets.js';
 import { estProtege } from './protections.js';
+import { calculerUnites } from './unites.js';
 
 export const RACINE = homedir();
 
@@ -19,6 +20,7 @@ export const etat = {
   fichiers: 0,
   dossiers: 0,
   projets: 0,
+  unites: 0,
   taille: 0,
   erreurs: 0,
   courant: '',
@@ -28,6 +30,17 @@ export const etat = {
 
 let arbre = null;
 let projets = []; // tous les projets détectés : { chemin, ...infos }
+
+let unites = []; // éléments à noter / supprimer, recalculés après le scan et chaque suppression
+
+export function lireUnites() {
+  return unites;
+}
+
+function recalculerUnites() {
+  unites = calculerUnites(arbre);
+  etat.unites = unites.length;
+}
 
 export function lireProjets() {
   return projets;
@@ -122,7 +135,7 @@ function marquerImbriques() {
 export async function lancerScan() {
   if (etat.etat === 'en-cours') return;
   Object.assign(etat, {
-    etat: 'en-cours', fichiers: 0, dossiers: 0, projets: 0, taille: 0, erreurs: 0,
+    etat: 'en-cours', fichiers: 0, dossiers: 0, projets: 0, unites: 0, taille: 0, erreurs: 0,
     courant: '', debut: Date.now(), fin: null,
   });
   projets = [];
@@ -130,6 +143,7 @@ export async function lancerScan() {
     const st = await lstat(RACINE);
     arbre = await parcourir(RACINE, '', st, st.dev, false);
     marquerImbriques();
+    recalculerUnites();
     etat.etat = 'termine';
   } catch {
     etat.etat = 'erreur';
@@ -181,4 +195,5 @@ export function retirerDuArbre(relatif) {
   etat.taille -= noeud.taille;
   projets = projets.filter((p) => p.chemin !== relatif && !p.chemin.startsWith(`${relatif}/`));
   etat.projets = projets.length;
+  recalculerUnites(); // le dossier parent peut être devenu une unité
 }

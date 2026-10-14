@@ -4,15 +4,9 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { RACINE, resumeNoeud, retirerDuArbre, trouverNoeud } from './scanner.js';
 import { lireNotes, retirerNotes } from './notes.js';
-import { estIntouchable } from './protections.js';
+import { DOSSIERS_SYSTEME, estIntouchable } from './protections.js';
 
 const executer = promisify(execFile);
-
-// Dossiers qu'on ne propose et n'envoie jamais à la Corbeille
-const PROTEGES = new Set([
-  'Desktop', 'Documents', 'Downloads', 'Library', 'Movies', 'Music', 'Pictures',
-  'Public', 'Applications', '.Trash', '.ssh', '.gnupg',
-]);
 
 // Envoie un élément à la vraie Corbeille via le Finder (« Remettre » reste possible).
 // Le chemin est passé en argument, jamais collé dans le script.
@@ -25,7 +19,7 @@ end run`;
 export function candidats(seuil) {
   const notes = lireNotes();
   const retenus = Object.entries(notes)
-    .filter(([chemin, note]) => note <= seuil && !PROTEGES.has(chemin) && !estIntouchable(chemin))
+    .filter(([chemin, note]) => note <= seuil && !DOSSIERS_SYSTEME.has(chemin) && !estIntouchable(chemin))
     .map(([chemin, note]) => ({ chemin, note, noeud: trouverNoeud(chemin) }))
     .filter((c) => c.noeud && c.noeud.type !== 'lien'); // absents du scan ou liens : ignorés
 
@@ -54,7 +48,7 @@ function message(erreur) {
 async function mettreUn(relatif) {
   const segments = typeof relatif === 'string' ? relatif.split('/') : [];
   if (segments.length === 0 || segments.some((s) => s === '' || s === '.' || s === '..')) throw new Error('Chemin invalide');
-  if (PROTEGES.has(relatif)) throw new Error('Dossier protégé');
+  if (DOSSIERS_SYSTEME.has(relatif)) throw new Error('Dossier protégé');
   if (estIntouchable(relatif)) throw new Error('Dossier protégé (ou contenant un dossier protégé)');
   if (!lireNotes()[relatif]) throw new Error('Élément non noté'); // on ne supprime que ce que tu as noté
 

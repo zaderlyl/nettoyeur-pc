@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { etat, lancerScan, lireProjets, listerDossier } from './scanner.js';
+import { etat, lancerScan, lireProjets, lireUnites, listerDossier } from './scanner.js';
 import { definirNote, lireNotes } from './notes.js';
 import { candidats, mettreALaCorbeille } from './suppression.js';
 
@@ -67,6 +67,24 @@ async function api(req, res) {
       case 'GET /api/projets':
         json(res, lireProjets());
         return true;
+      case 'GET /api/unites': {
+        // ?genre=projet|dossier|fichier, ?tri=taille|modifie|nom, ?limite=N (défaut 500)
+        const genre = url.searchParams.get('genre');
+        const tri = url.searchParams.get('tri') ?? 'taille';
+        const limite = Math.min(Math.max(Number(url.searchParams.get('limite') ?? 500) || 500, 1), 5000);
+        const toutes = lireUnites();
+        const retenues = genre ? toutes.filter((u) => u.unite === genre) : toutes;
+        const ordre = tri === 'nom' ? (a, b) => a.chemin.localeCompare(b.chemin, 'fr') : (a, b) => (b[tri] ?? 0) - (a[tri] ?? 0);
+        const parGenre = { projet: 0, dossier: 0, fichier: 0 };
+        for (const u of toutes) parGenre[u.unite]++;
+        json(res, {
+          total: retenues.length,
+          taille: retenues.reduce((somme, u) => somme + u.taille, 0),
+          parGenre,
+          elements: [...retenues].sort(ordre).slice(0, limite),
+        });
+        return true;
+      }
       case 'GET /api/dossier': {
         const liste = listerDossier(url.searchParams.get('chemin') ?? '');
         json(res, liste ?? { erreur: 'Dossier introuvable ou scan non fait' }, liste ? 200 : 404);
