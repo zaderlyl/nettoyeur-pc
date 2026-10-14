@@ -2,6 +2,8 @@ import { readdir, lstat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { detecterProjet } from './projets.js';
+import { estProtege } from './protections.js';
+import { calculerUnites, estImage } from './unites.js';
 
 export const RACINE = homedir();
 
@@ -18,6 +20,7 @@ export const etat = {
   fichiers: 0,
   dossiers: 0,
   projets: 0,
+  unites: 0,
   taille: 0,
   erreurs: 0,
   courant: '',
@@ -27,6 +30,23 @@ export const etat = {
 
 let arbre = null;
 let projets = []; // tous les projets détectés : { chemin, ...infos }
+
+let unites = []; // éléments à noter / supprimer, recalculés après le scan et chaque suppression
+
+export function lireUnites() {
+  return unites;
+}
+
+let genreParChemin = new Map();
+
+function recalculerUnites() {
+  unites = calculerUnites(arbre);
+  genreParChemin = new Map(unites.map((u) => [u.chemin, u.unite]));
+  etat.unites = unites.length;
+}
+
+// 'projet' | 'dossier' | 'fichier' si ce chemin est une unité, sinon null
+export const uniteDe = (relatif) => genreParChemin.get(relatif) ?? null;
 
 export function lireProjets() {
   return projets;
@@ -46,6 +66,11 @@ function nouveauNoeud(nom, type, st) {
 // Parcourt un dossier ; renvoie son nœud avec la taille cumulée
 async function parcourir(chemin, nom, st, dev, opaque) {
   const noeud = nouveauNoeud(nom, 'dossier', st);
+  // Un dossier protégé reste compté en taille mais son contenu n'est ni listé ni analysé
+  if (estProtege(relatif(chemin))) {
+    noeud.protege = true;
+    opaque = true;
+  }
   if (!opaque) noeud.enfants = [];
   etat.dossiers++;
   etat.courant = chemin;
@@ -116,7 +141,7 @@ function marquerImbriques() {
 export async function lancerScan() {
   if (etat.etat === 'en-cours') return;
   Object.assign(etat, {
-    etat: 'en-cours', fichiers: 0, dossiers: 0, projets: 0, taille: 0, erreurs: 0,
+    etat: 'en-cours', fichiers: 0, dossiers: 0, projets: 0, unites: 0, taille: 0, erreurs: 0,
     courant: '', debut: Date.now(), fin: null,
   });
   projets = [];
@@ -124,6 +149,7 @@ export async function lancerScan() {
     const st = await lstat(RACINE);
     arbre = await parcourir(RACINE, '', st, st.dev, false);
     marquerImbriques();
+    recalculerUnites();
     etat.etat = 'termine';
   } catch {
     etat.etat = 'erreur';
@@ -160,7 +186,11 @@ export function listerDossier(relatif) {
   return {
     nom: noeud.nom,
     taille: noeud.taille,
-    enfants: (noeud.enfants ?? []).map(resumeNoeud),
+    enfants: (noeud.enfants ?? []).map((e) => ({
+      ...resumeNoeud(e),
+      unite: uniteDe(relatif ? `${relatif}/${e.nom}` : e.nom), // null = simple conteneur, non notable
+      image: e.type === 'fichier' && estImage(e.nom),
+    })),
   };
 }
 
@@ -175,4 +205,5 @@ export function retirerDuArbre(relatif) {
   etat.taille -= noeud.taille;
   projets = projets.filter((p) => p.chemin !== relatif && !p.chemin.startsWith(`${relatif}/`));
   etat.projets = projets.length;
+  recalculerUnites(); // le dossier parent peut être devenu une unité
 }

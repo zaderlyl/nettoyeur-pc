@@ -26,8 +26,18 @@ td { padding: .4rem .6rem; border-bottom: 1px solid var(--bord); }
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--carte); }
 tbody tr.selection { background: #1d2a44; }
-.nom { display: flex; align-items: center; gap: .5rem; word-break: break-all; }
+.nom { display: flex; align-items: center; flex-wrap: wrap; gap: .2rem .5rem; word-break: break-all; }
+.vignette { width: 56px; height: 56px; flex: none; object-fit: cover; border-radius: .3rem; background: #222; }
+.vignette.vide { display: inline-grid; place-items: center; font-size: 1.4rem; }
+.grande-image { display: block; max-width: 100%; max-height: 22rem; min-height: 8rem; object-fit: contain; margin: .5rem auto; border-radius: .4rem; background: #222; }
+.grande-image.vide { display: grid; place-items: center; height: 6rem; font-size: 2rem; }
+.nom .apercu { flex-basis: 100%; font-size: .78rem; color: var(--discret); }
+.nom .apercu.memo { color: #e6c35c; font-style: italic; }
+.nom .chemin { flex-basis: 100%; font-size: .75rem; color: var(--discret); }
+input[type=search] { font: inherit; color: inherit; background: var(--fond); border: 1px solid var(--bord); border-radius: .4rem; padding: .3rem .6rem; min-width: 14rem; }
+#pied { text-align: center; margin: .8rem 0; }
 .etiquette { font-size: .7rem; padding: .05rem .4rem; border-radius: .8rem; background: #2a3b2a; color: #8fd68f; white-space: nowrap; }
+.etiquette.protege { background: #3b2a2a; color: #e69a9a; }
 .taille { position: relative; min-width: 6rem; }
 .taille i { position: absolute; inset: .3rem 0 .3rem auto; background: #4f8cff33; border-radius: .2rem; z-index: 0; }
 .taille b { position: relative; font-weight: 400; z-index: 1; }
@@ -44,6 +54,10 @@ td input[type=checkbox] { margin-right: .3rem; }
 .etoiles button:hover { color: #ffdd7a; }
 
 #details { position: sticky; top: 1rem; background: var(--carte); border: 1px solid var(--bord); border-radius: .6rem; padding: 1rem; font-size: .9rem; max-height: calc(100vh - 2rem); overflow: auto; }
+#details .resume { margin: .6rem 0 .2rem; }
+#details .phrase { margin: 0 0 .5rem; padding: .5rem .6rem; background: #1d2a44; border-radius: .4rem; line-height: 1.4; }
+#details .complements { margin: 0 0 .6rem; }
+.memo-zone { width: 100%; font: inherit; font-size: .85rem; color: inherit; background: var(--fond); border: 1px solid var(--bord); border-radius: .4rem; padding: .4rem .5rem; resize: vertical; }
 #details h2 { font-size: 1rem; margin: 0 0 .2rem; word-break: break-all; }
 #details dl { margin: .8rem 0 0; display: grid; grid-template-columns: auto 1fr; gap: .3rem .8rem; }
 #details dt { color: var(--discret); }

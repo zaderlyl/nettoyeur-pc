@@ -2,11 +2,14 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { etat, lancerScan, lireProjets, listerDossier } from './scanner.js';
+import { etat, lancerScan, lireProjets, lireUnites, listerDossier } from './scanner.js';
 import { definirNote, lireNotes } from './notes.js';
 import { candidats, mettreALaCorbeille } from './suppression.js';
+import { definirMemo, lireMemos } from './memos.js';
+import { resumer } from './resume.js';
+import { miniature } from './miniatures.js';
 
-const PORT = 5173;
+const PORT = Number(process.env.PORT) || 5173; // PORT=5174 npm run dev pour une 2e instance de test
 const DOSSIER_PUBLIC = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
 
 // Seul notre propre site peut appeler l'API (protège contre les autres sites et le DNS rebinding)
@@ -57,6 +60,36 @@ async function api(req, res) {
         json(res, { ok: true });
         return true;
       }
+      case 'GET /api/memos':
+        json(res, lireMemos());
+        return true;
+      case 'PUT /api/memos': {
+        const { chemin, memo } = await lireCorps(req);
+        await definirMemo(chemin, memo);
+        json(res, { ok: true });
+        return true;
+      }
+      case 'GET /api/resume':
+        json(res, await resumer(url.searchParams.get('chemin') ?? ''));
+        return true;
+      case 'GET /api/miniature': {
+        // Un autre site ne doit pas pouvoir afficher tes images : le navigateur indique l'origine de la requête
+        const origine = req.headers['sec-fetch-site'];
+        if (origine && origine !== 'same-origin') {
+          res.writeHead(403).end('Interdit');
+          return true;
+        }
+        const abandon = new AbortController();
+        res.on('close', () => { if (!res.writableEnded) abandon.abort(); }); // client parti avant la fin
+        const image = await miniature(url.searchParams.get('chemin') ?? '', Number(url.searchParams.get('cote')), abandon.signal);
+        res.writeHead(200, {
+          'Content-Type': 'image/jpeg',
+          'Cache-Control': 'private, max-age=3600',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        res.end(image);
+        return true;
+      }
       case 'POST /api/scan':
         lancerScan(); // lancé en arrière-plan
         json(res, etat, 202);
@@ -67,6 +100,39 @@ async function api(req, res) {
       case 'GET /api/projets':
         json(res, lireProjets());
         return true;
+      case 'GET /api/unites': {
+        // ?genre=projet|dossier|fichier  ?statut=notees|non-notees  ?dans=dossier/parent
+        // ?tri=taille|modifie|note|nom  ?limite=N (défaut 500, max 5000)  ?debut=N
+        const q = url.searchParams;
+        const genre = q.get('genre');
+        const statut = q.get('statut');
+        const dans = (q.get('dans') ?? '').trim().replace(/^~?\/+|\/+$/g, '').toLowerCase();
+        const tri = q.get('tri') ?? 'taille';
+        const limite = Math.min(Math.max(Number(q.get('limite') ?? 500) || 500, 1), 5000);
+        const debut = Math.max(Number(q.get('debut') ?? 0) || 0, 0);
+        const notes = lireNotes();
+        const toutes = lireUnites();
+
+        const retenues = toutes.filter((u) => (!genre || u.unite === genre)
+          && (statut !== 'notees' || notes[u.chemin])
+          && (statut !== 'non-notees' || !notes[u.chemin])
+          && (!dans || u.chemin.toLowerCase() === dans || u.chemin.toLowerCase().startsWith(`${dans}/`)));
+
+        const ordres = {
+          nom: (a, b) => a.chemin.localeCompare(b.chemin, 'fr'),
+          note: (a, b) => (notes[b.chemin] ?? 0) - (notes[a.chemin] ?? 0) || b.taille - a.taille,
+          modifie: (a, b) => (b.modifie ?? 0) - (a.modifie ?? 0),
+        };
+        const parGenre = { projet: 0, dossier: 0, fichier: 0 };
+        for (const u of toutes) parGenre[u.unite]++;
+        json(res, {
+          total: retenues.length,
+          taille: retenues.reduce((somme, u) => somme + u.taille, 0),
+          parGenre,
+          elements: [...retenues].sort(ordres[tri] ?? ((a, b) => b.taille - a.taille)).slice(debut, debut + limite),
+        });
+        return true;
+      }
       case 'GET /api/dossier': {
         const liste = listerDossier(url.searchParams.get('chemin') ?? '');
         json(res, liste ?? { erreur: 'Dossier introuvable ou scan non fait' }, liste ? 200 : 404);
@@ -116,6 +182,14 @@ const serveur = createServer(async (req, res) => {
   } catch {
     res.writeHead(404).end('Introuvable');
   }
+});
+
+// Port déjà pris (ex. ancienne instance encore lancée) : on s'arrête au lieu de laisser l'ancienne répondre
+serveur.on('error', (erreur) => {
+  console.error(erreur.code === 'EADDRINUSE'
+    ? `Le port ${PORT} est déjà utilisé : une autre instance tourne. Arrête-la puis relance.`
+    : erreur.message);
+  process.exit(1);
 });
 
 // Écoute uniquement en local
