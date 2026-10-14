@@ -7,6 +7,7 @@ import { definirNote, lireNotes } from './notes.js';
 import { candidats, mettreALaCorbeille } from './suppression.js';
 import { definirMemo, lireMemos } from './memos.js';
 import { resumer } from './resume.js';
+import { miniature } from './miniatures.js';
 
 const PORT = Number(process.env.PORT) || 5173; // PORT=5174 npm run dev pour une 2e instance de test
 const DOSSIER_PUBLIC = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
@@ -71,6 +72,24 @@ async function api(req, res) {
       case 'GET /api/resume':
         json(res, await resumer(url.searchParams.get('chemin') ?? ''));
         return true;
+      case 'GET /api/miniature': {
+        // Un autre site ne doit pas pouvoir afficher tes images : le navigateur indique l'origine de la requête
+        const origine = req.headers['sec-fetch-site'];
+        if (origine && origine !== 'same-origin') {
+          res.writeHead(403).end('Interdit');
+          return true;
+        }
+        const abandon = new AbortController();
+        res.on('close', () => { if (!res.writableEnded) abandon.abort(); }); // client parti avant la fin
+        const image = await miniature(url.searchParams.get('chemin') ?? '', Number(url.searchParams.get('cote')), abandon.signal);
+        res.writeHead(200, {
+          'Content-Type': 'image/jpeg',
+          'Cache-Control': 'private, max-age=3600',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        res.end(image);
+        return true;
+      }
       case 'POST /api/scan':
         lancerScan(); // lancé en arrière-plan
         json(res, etat, 202);

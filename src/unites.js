@@ -26,6 +26,8 @@ const IGNORES = new Set(['Thumbs.db', 'desktop.ini', 'Icon\r']);
 
 const extension = (nom) => (nom.includes('.') ? nom.slice(nom.lastIndexOf('.')).toLowerCase() : '');
 
+export const estImage = (nom) => IMAGES.has(extension(nom));
+
 function estIndividuel(fichiers) {
   const concernes = fichiers.filter((f) => IMAGES.has(extension(f.nom)) || DOCUMENTS.has(extension(f.nom)));
   return concernes.length / fichiers.length > SEUIL_INDIVIDUEL;
@@ -38,7 +40,7 @@ function contientDepotGit(noeud) {
 
 function unite(noeud, chemin, genre, dossier) {
   const { enfants, ...resume } = noeud;
-  return { ...resume, chemin, unite: genre, dossier, contenu: enfants ? enfants.length : null };
+  return { ...resume, chemin, unite: genre, dossier, contenu: enfants ? enfants.length : null, image: genre === 'fichier' && estImage(noeud.nom) };
 }
 
 // Parcourt l'arbre du scan et renvoie la liste à plat des unités

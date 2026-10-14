@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { detecterProjet } from './projets.js';
 import { estProtege } from './protections.js';
-import { calculerUnites } from './unites.js';
+import { calculerUnites, estImage } from './unites.js';
 
 export const RACINE = homedir();
 
@@ -189,6 +189,7 @@ export function listerDossier(relatif) {
     enfants: (noeud.enfants ?? []).map((e) => ({
       ...resumeNoeud(e),
       unite: uniteDe(relatif ? `${relatif}/${e.nom}` : e.nom), // null = simple conteneur, non notable
+      image: e.type === 'fichier' && estImage(e.nom),
     })),
   };
 }

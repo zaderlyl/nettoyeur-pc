@@ -29,32 +29,38 @@ const apercus = new Map(); // chemin -> élément « aperçu » de sa ligne, pou
 // Cinq étoiles cliquables ; recliquer sur la note actuelle la retire
 const widgetsEtoiles = new Set(); // pour synchroniser ligne et panneau de détails
 
+function synchroniserEtoiles(chemin) {
+  for (const w of widgetsEtoiles) {
+    if (!w.zone.isConnected) widgetsEtoiles.delete(w);
+    else if (w.chemin === chemin) w.dessiner();
+  }
+}
+
+// Enregistre une note (0 = retirer) : affichage immédiat, retour en arrière si la sauvegarde échoue
+async function noter(chemin, nouvelle) {
+  const precedente = etatUI.notes[chemin];
+  if (nouvelle === (precedente ?? 0)) return;
+  if (nouvelle) etatUI.notes[chemin] = nouvelle; else delete etatUI.notes[chemin];
+  synchroniserEtoiles(chemin);
+  const rep = await envoyer('/api/notes', 'PUT', { chemin, note: nouvelle }).catch(() => null);
+  if (!rep?.ok) {
+    if (precedente) etatUI.notes[chemin] = precedente; else delete etatUI.notes[chemin];
+    synchroniserEtoiles(chemin);
+    alert('La note n’a pas pu être enregistrée.');
+  }
+}
+
 function etoiles(chemin) {
   const zone = el('span', { className: 'etoiles' });
-  const synchroniser = () => {
-    for (const w of widgetsEtoiles) {
-      if (!w.zone.isConnected) widgetsEtoiles.delete(w);
-      else if (w.chemin === chemin) w.dessiner();
-    }
-  };
   const dessiner = () => {
     const note = etatUI.notes[chemin] ?? 0;
     zone.replaceChildren(...[1, 2, 3, 4, 5].map((n) => el('button', {
       className: n <= note ? 'on' : '',
       textContent: '★',
       title: n === note ? 'Retirer la note' : `${n} / 5`,
-      onclick: async (ev) => {
+      onclick: (ev) => {
         ev.stopPropagation(); // ne sélectionne pas la ligne
-        const nouvelle = n === note ? 0 : n;
-        const precedente = etatUI.notes[chemin];
-        if (nouvelle) etatUI.notes[chemin] = nouvelle; else delete etatUI.notes[chemin];
-        synchroniser();
-        const rep = await envoyer('/api/notes', 'PUT', { chemin, note: nouvelle }).catch(() => null);
-        if (!rep?.ok) { // sauvegarde échouée : on revient en arrière
-          if (precedente) etatUI.notes[chemin] = precedente; else delete etatUI.notes[chemin];
-          synchroniser();
-          alert('La note n’a pas pu être enregistrée.');
-        }
+        noter(chemin, n === note ? 0 : n);
       },
     })));
   };
@@ -118,6 +124,16 @@ $('scan').addEventListener('click', async () => {
   await envoyer('/api/scan', 'POST');
   suivreScan();
 });
+
+// ---------- Miniatures ----------
+const urlMiniature = (l, cote) => `/api/miniature?chemin=${encodeURIComponent(l.chemin)}&cote=${cote}&v=${Math.round(l.modifie ?? 0)}`;
+
+function imageMiniature(l, cote, classe) {
+  const img = el('img', { className: classe, loading: 'lazy', alt: '', src: urlMiniature(l, cote) });
+  // Format illisible ou fichier abîmé : une icône à la place
+  img.addEventListener('error', () => img.replaceWith(el('span', { className: `${classe} vide`, textContent: '🖼️', title: 'Aperçu indisponible' })));
+  return img;
+}
 
 // ---------- Chargement des lignes ----------
 // Vue unités : le serveur filtre, trie et pagine (plusieurs milliers d'unités)
@@ -204,6 +220,7 @@ function majApercu(l) {
 
 function afficherListe() {
   apercus.clear();
+  etatUI.rangees = []; // { l, tr } dans l'ordre d'affichage, pour la navigation au clavier
   const lignes = trier(etatUI.lignes);
   const max = Math.max(1, ...lignes.map((l) => l.taille));
   const corps = $('liste');
@@ -211,7 +228,9 @@ function afficherListe() {
   $('vide').hidden = lignes.length > 0;
 
   for (const l of lignes) {
-    const nom = el('div', { className: 'nom' }, `${l.type === 'dossier' ? '📁' : l.type === 'lien' ? '🔗' : '📄'} ${l.nom}`);
+    const nom = l.image
+      ? el('div', { className: 'nom' }, imageMiniature(l, 120, 'vignette'), l.nom)
+      : el('div', { className: 'nom' }, `${l.type === 'dossier' ? '📁' : l.type === 'lien' ? '🔗' : '📄'} ${l.nom}`);
     if (etatUI.vue !== 'fichiers') nom.append(el('span', { className: 'chemin', textContent: `~/${l.dossier ?? ''}` }));
     if (l.unite) {
       const apercu = el('span', { className: 'apercu' });
@@ -247,6 +266,7 @@ function afficherListe() {
       afficherDetails(l);
     });
     tr.addEventListener('dblclick', () => ouvrir(l));
+    etatUI.rangees.push({ l, tr });
     corps.append(tr);
   }
 }
@@ -383,12 +403,30 @@ function afficherDetails(l) {
   }
 
   panneau.append(el('h2', { textContent: l.nom }));
+  if (l.image) panneau.append(imageMiniature(l, 480, 'grande-image'));
   if (l.unite && !l.protege) panneau.append(blocResume(l));
   panneau.append(dl);
   if ((l.type === 'dossier' && l.contenu !== null) || l.type === 'fichier') {
     panneau.append(el('p', {}, el('button', { className: 'primaire', textContent: l.type === 'fichier' ? 'Voir son dossier' : 'Ouvrir le dossier', onclick: () => ouvrir(l) })));
   }
 }
+
+// ---------- Clavier : ↑/↓ pour changer d'élément, 0 à 5 pour noter l'élément sélectionné ----------
+document.addEventListener('keydown', (ev) => {
+  if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.target.closest?.('input, textarea, select')) return;
+  const rangees = etatUI.rangees ?? [];
+  const position = rangees.findIndex((r) => r.l === etatUI.selection);
+
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    if (rangees.length === 0) return;
+    ev.preventDefault();
+    const suivante = position < 0 ? 0 : Math.min(Math.max(position + (ev.key === 'ArrowDown' ? 1 : -1), 0), rangees.length - 1);
+    rangees[suivante].tr.click();
+    rangees[suivante].tr.scrollIntoView({ block: 'nearest' });
+  } else if (/^[0-5]$/.test(ev.key) && position >= 0 && rangees[position].l.unite) {
+    noter(rangees[position].l.chemin, Number(ev.key));
+  }
+});
 
 // ---------- Événements ----------
 $('tri').addEventListener('change', () => (etatUI.vue === 'fichiers' ? afficherListe() : charger()));
